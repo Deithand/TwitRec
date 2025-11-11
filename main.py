@@ -138,14 +138,8 @@ class TwitRec:
 
         if success:
             self.ui.show_success(f"Запись {streamer} начата! Качество: {quality}")
-            # Проверка что запись действительно активна
-            if self.recorder.is_recording(streamer):
-                self.ui.show_info("Запись подтверждена и работает")
-            else:
-                self.ui.show_warning("Запись начата, но процесс может завершиться")
         else:
             self.ui.show_error(f"Не удалось начать запись {streamer}")
-            self.ui.show_info("Проверьте логи для получения подробностей об ошибке")
 
     def stop_recording_action(self):
         """Действие: остановить запись"""

@@ -4,6 +4,7 @@
 import subprocess
 import os
 import signal
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
@@ -86,20 +87,36 @@ class StreamRecorder:
         # Путь к лог файлу
         log_file_path = self.logs_dir / f"{streamer}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
+        log_file = None
         try:
+            # Открываем файл лога (не используем with, чтобы файл оставался открытым)
+            log_file = open(log_file_path, 'w', encoding='utf-8')
+
             # Запуск процесса
-            with open(log_file_path, 'w', encoding='utf-8') as log_file:
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    preexec_fn=os.setsid if os.name != 'nt' else None
-                )
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                preexec_fn=os.setsid if os.name != 'nt' else None
+            )
+
+            # Даем процессу время на запуск
+            time.sleep(2)
+
+            # Проверяем что процесс не упал сразу
+            if process.poll() is not None:
+                # Процесс уже завершен - ошибка
+                exit_code = process.poll()
+                log_file.close()
+                self.logger.error(f"Процесс streamlink завершился сразу после запуска с кодом {exit_code}")
+                self.logger.error(f"Проверьте лог файл: {log_file_path}")
+                return False
 
             self.active_recordings[streamer] = {
                 'process': process,
                 'output_path': output_path,
                 'log_path': log_file_path,
+                'log_file': log_file,  # Сохраняем файловый дескриптор
                 'start_time': datetime.now(),
                 'quality': quality
             }
@@ -109,6 +126,12 @@ class StreamRecorder:
 
         except Exception as e:
             self.logger.error(f"Ошибка при запуске записи {streamer}: {e}")
+            # Закрыть файл лога в случае ошибки
+            if log_file:
+                try:
+                    log_file.close()
+                except:
+                    pass
             return False
 
     def stop_recording(self, streamer: str) -> bool:
@@ -130,6 +153,10 @@ class StreamRecorder:
             # Ожидание завершения
             process.wait(timeout=10)
 
+            # Закрыть файл лога
+            if 'log_file' in recording:
+                recording['log_file'].close()
+
             self.logger.info(f"Запись {streamer} остановлена")
             del self.active_recordings[streamer]
             return True
@@ -141,12 +168,22 @@ class StreamRecorder:
             else:
                 process.kill()
 
+            # Закрыть файл лога
+            if 'log_file' in recording:
+                recording['log_file'].close()
+
             del self.active_recordings[streamer]
             self.logger.warning(f"Запись {streamer} принудительно остановлена")
             return True
 
         except Exception as e:
             self.logger.error(f"Ошибка при остановке записи {streamer}: {e}")
+            # Попытаться закрыть файл лога даже при ошибке
+            if 'log_file' in recording:
+                try:
+                    recording['log_file'].close()
+                except:
+                    pass
             return False
 
     def is_recording(self, streamer: str) -> bool:
@@ -159,7 +196,12 @@ class StreamRecorder:
 
         # Проверка статуса процесса
         if process.poll() is not None:
-            # Процесс завершен
+            # Процесс завершен - закрыть файл лога
+            if 'log_file' in recording:
+                try:
+                    recording['log_file'].close()
+                except:
+                    pass
             del self.active_recordings[streamer]
             return False
 
@@ -172,6 +214,12 @@ class StreamRecorder:
         for streamer, recording in self.active_recordings.items():
             if recording['process'].poll() is not None:
                 finished.append(streamer)
+                # Закрыть файл лога
+                if 'log_file' in recording:
+                    try:
+                        recording['log_file'].close()
+                    except:
+                        pass
 
         for streamer in finished:
             del self.active_recordings[streamer]

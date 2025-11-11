@@ -4,6 +4,7 @@
 import subprocess
 import os
 import signal
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
@@ -96,6 +97,23 @@ class StreamRecorder:
                     preexec_fn=os.setsid if os.name != 'nt' else None
                 )
 
+            # Проверка что процесс успешно запустился
+            time.sleep(2)  # Даем процессу время на запуск
+
+            exit_code = process.poll()
+            if exit_code is not None:
+                # Процесс завершился сразу после запуска
+                self.logger.error(f"Процесс streamlink для {streamer} завершился сразу с кодом {exit_code}")
+                # Попытка прочитать логи для диагностики
+                try:
+                    with open(log_file_path, 'r', encoding='utf-8') as f:
+                        log_content = f.read()
+                        if log_content:
+                            self.logger.error(f"Лог streamlink: {log_content[:500]}")
+                except Exception:
+                    pass
+                return False
+
             self.active_recordings[streamer] = {
                 'process': process,
                 'output_path': output_path,
@@ -170,7 +188,21 @@ class StreamRecorder:
         # Очистить завершенные записи
         finished = []
         for streamer, recording in self.active_recordings.items():
-            if recording['process'].poll() is not None:
+            exit_code = recording['process'].poll()
+            if exit_code is not None:
+                # Процесс завершился - логируем
+                self.logger.warning(f"Запись {streamer} завершилась с кодом {exit_code}")
+                # Попытка прочитать логи для диагностики
+                try:
+                    log_path = recording['log_path']
+                    if log_path.exists():
+                        with open(log_path, 'r', encoding='utf-8') as f:
+                            log_content = f.read()
+                            # Логируем последние 500 символов
+                            if log_content:
+                                self.logger.info(f"Последние строки лога {streamer}: {log_content[-500:]}")
+                except Exception as e:
+                    self.logger.error(f"Не удалось прочитать лог {streamer}: {e}")
                 finished.append(streamer)
 
         for streamer in finished:

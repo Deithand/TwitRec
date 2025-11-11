@@ -50,7 +50,7 @@
 ### 1. Клонирование репозитория
 
 ```bash
-git clone https://github.com/yourusername/TwitRec.git
+git clone https://github.com/Deithand/TwitRec.git
 cd TwitRec
 ```
 

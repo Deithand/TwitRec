@@ -87,6 +87,32 @@ class StreamRecorder:
         # Путь к лог файлу
         log_file_path = self.logs_dir / f"{streamer}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
+        # ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ
+        self.logger.info(f"=" * 80)
+        self.logger.info(f"Запуск записи для стримера: {streamer}")
+        self.logger.info(f"Качество: {quality}")
+        self.logger.info(f"URL стрима: {stream_url}")
+        self.logger.info(f"Путь вывода: {output_path}")
+        self.logger.info(f"Путь лога streamlink: {log_file_path}")
+        self.logger.info(f"Рабочая директория: {os.getcwd()}")
+        self.logger.info(f"Директория записей существует: {self.recordings_dir.exists()}")
+        self.logger.info(f"Директория логов существует: {self.logs_dir.exists()}")
+
+        # Проверка доступности streamlink
+        try:
+            import shutil
+            streamlink_path = shutil.which("streamlink")
+            if streamlink_path:
+                self.logger.info(f"Путь к streamlink: {streamlink_path}")
+            else:
+                self.logger.error("КРИТИЧЕСКАЯ ОШИБКА: streamlink не найден в PATH!")
+                return False
+        except Exception as e:
+            self.logger.error(f"Ошибка при проверке streamlink: {e}")
+
+        self.logger.info(f"Команда streamlink: {' '.join(cmd)}")
+        self.logger.info(f"=" * 80)
+
         try:
             # Запуск процесса
             with open(log_file_path, 'w', encoding='utf-8') as log_file:
@@ -97,22 +123,28 @@ class StreamRecorder:
                     preexec_fn=os.setsid if os.name != 'nt' else None
                 )
 
+            self.logger.info(f"Процесс streamlink запущен с PID: {process.pid}")
+
             # Проверка что процесс успешно запустился
             time.sleep(2)  # Даем процессу время на запуск
 
             exit_code = process.poll()
             if exit_code is not None:
                 # Процесс завершился сразу после запуска
-                self.logger.error(f"Процесс streamlink для {streamer} завершился сразу с кодом {exit_code}")
+                self.logger.error(f"ОШИБКА: Процесс streamlink для {streamer} завершился сразу с кодом {exit_code}")
                 # Попытка прочитать логи для диагностики
                 try:
                     with open(log_file_path, 'r', encoding='utf-8') as f:
                         log_content = f.read()
                         if log_content:
-                            self.logger.error(f"Лог streamlink: {log_content[:500]}")
-                except Exception:
-                    pass
+                            self.logger.error(f"Вывод streamlink:\n{log_content}")
+                        else:
+                            self.logger.error("Лог streamlink пуст")
+                except Exception as e:
+                    self.logger.error(f"Не удалось прочитать лог: {e}")
                 return False
+
+            self.logger.info(f"Процесс streamlink работает корректно (PID: {process.pid})")
 
             self.active_recordings[streamer] = {
                 'process': process,
@@ -122,21 +154,36 @@ class StreamRecorder:
                 'quality': quality
             }
 
-            self.logger.info(f"Начата запись {streamer} в {output_path}")
+            self.logger.info(f"✓ Запись {streamer} успешно начата в {output_path}")
             return True
 
+        except FileNotFoundError as e:
+            self.logger.error(f"ОШИБКА: Файл или директория не найдены: {e}")
+            self.logger.error("Возможно, streamlink не установлен или недоступен")
+            return False
+        except PermissionError as e:
+            self.logger.error(f"ОШИБКА: Недостаточно прав доступа: {e}")
+            self.logger.error(f"Проверьте права на запись в: {self.recordings_dir} и {self.logs_dir}")
+            return False
         except Exception as e:
-            self.logger.error(f"Ошибка при запуске записи {streamer}: {e}")
+            self.logger.error(f"НЕОЖИДАННАЯ ОШИБКА при запуске записи {streamer}: {type(e).__name__}: {e}")
+            import traceback
+            self.logger.error(f"Traceback:\n{traceback.format_exc()}")
             return False
 
     def stop_recording(self, streamer: str) -> bool:
         """Остановить запись стрима"""
+        self.logger.info(f"Попытка остановки записи: {streamer}")
+
         if streamer not in self.active_recordings:
             self.logger.warning(f"Активной записи {streamer} не найдено")
+            self.logger.info(f"Активные записи: {list(self.active_recordings.keys())}")
             return False
 
         recording = self.active_recordings[streamer]
         process = recording['process']
+
+        self.logger.info(f"Остановка процесса PID {process.pid} для {streamer}")
 
         try:
             # Корректная остановка процесса
@@ -191,18 +238,29 @@ class StreamRecorder:
             exit_code = recording['process'].poll()
             if exit_code is not None:
                 # Процесс завершился - логируем
-                self.logger.warning(f"Запись {streamer} завершилась с кодом {exit_code}")
+                self.logger.warning(f"=" * 80)
+                self.logger.warning(f"ЗАПИСЬ ЗАВЕРШИЛАСЬ: {streamer}")
+                self.logger.warning(f"Код выхода процесса: {exit_code}")
+                self.logger.warning(f"PID процесса: {recording['process'].pid}")
+
                 # Попытка прочитать логи для диагностики
                 try:
                     log_path = recording['log_path']
                     if log_path.exists():
                         with open(log_path, 'r', encoding='utf-8') as f:
                             log_content = f.read()
-                            # Логируем последние 500 символов
+                            # Логируем ВСЁ содержимое лога
                             if log_content:
-                                self.logger.info(f"Последние строки лога {streamer}: {log_content[-500:]}")
+                                self.logger.warning(f"ПОЛНЫЙ ЛОГ STREAMLINK для {streamer}:")
+                                self.logger.warning(f"\n{log_content}")
+                            else:
+                                self.logger.warning(f"Лог файл пуст: {log_path}")
+                    else:
+                        self.logger.warning(f"Лог файл не существует: {log_path}")
                 except Exception as e:
                     self.logger.error(f"Не удалось прочитать лог {streamer}: {e}")
+
+                self.logger.warning(f"=" * 80)
                 finished.append(streamer)
 
         for streamer in finished:

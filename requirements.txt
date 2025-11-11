@@ -1,0 +1,6 @@
+requests>=2.31.0
+rich>=13.7.0
+streamlink>=6.5.0
+python-dotenv>=1.0.0
+click>=8.1.7
+twitchAPI>=4.1.0
